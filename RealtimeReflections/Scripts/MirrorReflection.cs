@@ -24,12 +24,18 @@ namespace RealtimeReflections
 	    private Hashtable m_ReflectionCameras = new Hashtable(); // Camera -> Camera table
  
 	    public RenderTexture m_ReflectionTexture = null;
+        public RenderTexture m_ReflectionTextureNormalProjection = null;
+        public RenderTexture m_ReflectionTextureObliqueProjection = null;
 	    private int m_OldReflectionTextureWidth = 0;
         private int m_OldReflectionTextureHeight = 0;
 
         private static bool s_InsideRendering = false;
 
         private Camera cameraToUse = null;
+
+        public Material matCombineShader = null;
+
+        //private ClipGeometry clipGeometry = null;
 
         public struct EnvironmentSetting
         {
@@ -49,6 +55,25 @@ namespace RealtimeReflections
             set { currentBackgroundSettings = value; }
         }
 
+        public struct ObliqueProjectionMatrixSetting
+        {
+            public const int
+
+            Always = 0, // fastest, but breaks fog in reflections
+            IndoorsOnly = 1, // fast, outdoors fog works, but might produce wrong reflections in extreme situations with geometry when pc is "above" geometry
+            Advanced = 2; // slow, correct, fog works, masks fogged reflection with pixels from reflection produced with oblique projection matrix
+        }
+
+        private int currentObliqueProjectionMatrixSetting = ObliqueProjectionMatrixSetting.Advanced; //ObliqueProjectionMatrixSetting.IndoorsOnly;
+        public int CurrentObliqueProjectionMatrixSetting
+        {
+            get
+            {
+                return currentObliqueProjectionMatrixSetting;
+            }
+            set { currentObliqueProjectionMatrixSetting = value; }
+        }
+
         void Start()
         {
             GameObject stackedCameraGameObject = GameObject.Find("stackedCamera");
@@ -60,6 +85,8 @@ namespace RealtimeReflections
             {
                 cameraToUse = Camera.main;
             }
+
+            matCombineShader = new Material(Shader.Find("Daggerfall/RealtimeReflections/CombineReflectionTextures"));
         }
 
 	    // This is called when it's known that the object will be rendered by some
@@ -114,8 +141,15 @@ namespace RealtimeReflections
 		    // plane. This way we clip everything below/above it for free.
 		    Vector4 clipPlane = CameraSpacePlane( reflectionCamera, pos, normal, 1.0f );
 		    //Matrix4x4 projection = cam.projectionMatrix;
-		    //Matrix4x4 projection = cam.CalculateObliqueMatrix(clipPlane);
-		    //reflectionCamera.projectionMatrix = projection; // do not set oblique projection matrix since it will fuck up fog in reflections - disabling this step seems to do not any harm ;)
+
+            // only set oblique projection matrix either when mode is set to "Always" or when mode is set to "IndoorsOnly" and pc is indoors (so reflections in multi-level buildings
+            // don't get reflections from lower floor geometry, outdoors this issue usually don't arise but oblique projection matrix will break fog in reflections - so don't apply it
+            if (currentObliqueProjectionMatrixSetting == ObliqueProjectionMatrixSetting.Always ||
+               (currentObliqueProjectionMatrixSetting == ObliqueProjectionMatrixSetting.IndoorsOnly) && (currentBackgroundSettings == EnvironmentSetting.IndoorSetting))
+            {
+                Matrix4x4 projection = cam.CalculateObliqueMatrix(clipPlane);
+                reflectionCamera.projectionMatrix = projection;
+            }
 
             reflectionCamera.cullingMask = ~(1 << 4) & LayerMask.NameToLayer("Everything"); //m_ReflectLayers.value; // never render water layer
 		    reflectionCamera.targetTexture = m_ReflectionTexture;
@@ -129,8 +163,40 @@ namespace RealtimeReflections
             GL.invertCulling = true;
 		    reflectionCamera.transform.position = newpos;
 		    Vector3 euler = cam.transform.eulerAngles;
-		    reflectionCamera.transform.eulerAngles = new Vector3(0, euler.y, euler.z);
-		    reflectionCamera.Render();
+            reflectionCamera.transform.eulerAngles = new Vector3(0, euler.y, euler.z);
+
+            if (currentObliqueProjectionMatrixSetting == ObliqueProjectionMatrixSetting.Advanced)
+            {
+                reflectionCamera.targetTexture = m_ReflectionTextureNormalProjection;
+
+                // render reflection camera
+                reflectionCamera.Render();
+
+                ////// render reflection camera (with oblique projection matrix)
+                Matrix4x4 backupProjectionMatrix = reflectionCamera.projectionMatrix;
+                Matrix4x4 projection = cam.CalculateObliqueMatrix(clipPlane);
+                reflectionCamera.projectionMatrix = projection;
+                reflectionCamera.targetTexture = m_ReflectionTextureObliqueProjection;
+                reflectionCamera.renderingPath = RenderingPath.Forward;
+                reflectionCamera.backgroundColor = Color.black;
+                CameraClearFlags backupClearFlags = reflectionCamera.clearFlags;
+                reflectionCamera.clearFlags = CameraClearFlags.SolidColor;
+                QualitySettings.pixelLightCount = 0;
+                reflectionCamera.Render();
+                QualitySettings.pixelLightCount = oldPixelLightCount;
+                reflectionCamera.clearFlags = backupClearFlags;
+                reflectionCamera.renderingPath = cam.renderingPath;
+                reflectionCamera.targetTexture = m_ReflectionTexture;
+                reflectionCamera.projectionMatrix = backupProjectionMatrix;
+
+                Graphics.Blit(m_ReflectionTextureNormalProjection, m_ReflectionTexture, matCombineShader);
+            }
+            else
+            {
+                // render reflection camera
+                reflectionCamera.Render();
+            }
+
 		    reflectionCamera.transform.position = oldpos;
             GL.invertCulling = false;
 
@@ -153,6 +219,16 @@ namespace RealtimeReflections
 			    Destroy( m_ReflectionTexture );
 			    m_ReflectionTexture = null;
 		    }
+            if (m_ReflectionTextureNormalProjection)
+            {
+                Destroy(m_ReflectionTextureNormalProjection);
+                m_ReflectionTextureNormalProjection = null;
+            }
+            if (m_ReflectionTextureObliqueProjection)
+            {
+                Destroy(m_ReflectionTextureObliqueProjection);
+                m_ReflectionTextureObliqueProjection = null;
+            }
 		    //foreach( DictionaryEntry kvp in m_ReflectionCameras )
 			//    DestroyImmediate( ((Camera)kvp.Value).gameObject );
 		    m_ReflectionCameras.Clear();
@@ -222,20 +298,47 @@ namespace RealtimeReflections
 		    {
 			    if( m_ReflectionTexture )
 				    Destroy( m_ReflectionTexture );
+
                 m_ReflectionTexture = new RenderTexture(m_TextureWidth, m_TextureHeight, 16); //, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
 
 			    m_ReflectionTexture.name = "__MirrorReflection" + GetInstanceID();
 			    m_ReflectionTexture.isPowerOfTwo = true;
 
-                //m_ReflectionTexture.generateMips = true;
                 m_ReflectionTexture.useMipMap = true;
                 m_ReflectionTexture.wrapMode = TextureWrapMode.Clamp;
                 m_ReflectionTexture.filterMode = FilterMode.Bilinear;
+
+                if (m_ReflectionTextureNormalProjection)
+                    Destroy(m_ReflectionTextureNormalProjection);
+
+                m_ReflectionTextureNormalProjection = new RenderTexture(m_TextureWidth, m_TextureHeight, 16); //, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+
+                m_ReflectionTextureNormalProjection.name = "__MirrorReflectionNormalProjection" + GetInstanceID();
+                m_ReflectionTextureNormalProjection.isPowerOfTwo = true;
+
+                m_ReflectionTextureNormalProjection.useMipMap = true;
+                m_ReflectionTextureNormalProjection.wrapMode = TextureWrapMode.Clamp;
+                m_ReflectionTextureNormalProjection.filterMode = FilterMode.Bilinear;                
+
+                if (m_ReflectionTextureObliqueProjection)
+                    Destroy(m_ReflectionTextureObliqueProjection);
+
+                m_ReflectionTextureObliqueProjection = new RenderTexture(m_TextureWidth, m_TextureHeight, 16); //, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+
+                m_ReflectionTextureObliqueProjection.name = "__MirrorReflection_ObliqueProjection" + GetInstanceID();
+                m_ReflectionTextureObliqueProjection.isPowerOfTwo = true;
+
+                m_ReflectionTextureObliqueProjection.useMipMap = true;
+                m_ReflectionTextureObliqueProjection.wrapMode = TextureWrapMode.Clamp;
+                m_ReflectionTextureObliqueProjection.filterMode = FilterMode.Bilinear;
 
                 //m_ReflectionTexture.hideFlags = HideFlags.DontSave;
                 m_OldReflectionTextureWidth = m_TextureWidth;
                 m_OldReflectionTextureHeight = m_TextureHeight;
             }
+
+            matCombineShader.SetTexture("_ReflTex", m_ReflectionTextureNormalProjection);
+            matCombineShader.SetTexture("_ObliqueProjectedTex", m_ReflectionTextureObliqueProjection);
  
 		    // Camera for reflection
 		    reflectionCamera = m_ReflectionCameras[currentCamera] as Camera;
@@ -259,6 +362,7 @@ namespace RealtimeReflections
                         UnityStandardAssets.ImageEffects.GlobalFog globalFogMainCamera = Camera.main.gameObject.GetComponent<UnityStandardAssets.ImageEffects.GlobalFog>();
                         scriptGlobalFog.distanceFog = globalFogMainCamera.distanceFog;
                         scriptGlobalFog.excludeFarPixels = true; // skybox + sun will show up in reflections (otherwise no sun reflection)
+                        //scriptGlobalFog.excludeFarPixels = globalFogMainCamera.excludeFarPixels;
                         scriptGlobalFog.useRadialDistance = globalFogMainCamera.useRadialDistance;
                         scriptGlobalFog.heightFog = globalFogMainCamera.heightFog;
                         scriptGlobalFog.height = globalFogMainCamera.height;
@@ -266,6 +370,9 @@ namespace RealtimeReflections
                         scriptGlobalFog.startDistance = globalFogMainCamera.startDistance;
                     }
                 }
+
+                //clipGeometry = go.AddComponent<ClipGeometry>();
+                //go.AddComponent<ClipGeometry>();
 
                 go.transform.SetParent(GameObject.Find("RealtimeReflections").transform);
 		    }
