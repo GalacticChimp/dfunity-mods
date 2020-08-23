@@ -94,7 +94,7 @@ Shader "Daggerfall/DistantTerrain/TransitionRingTilemapTextureArray" {
 		#pragma surface surf Standard noforwardadd //finalcolor:fcolor alpha:fade keepalpha
 		#pragma glsl
 
-		#pragma multi_compile __ ENABLE_WATER_REFLECTIONS _NORMALMAP
+		#pragma multi_compile_local __ ENABLE_WATER_REFLECTIONS _NORMALMAP
 
 		void surf (Input IN, inout SurfaceOutputStandard o)
 		{
@@ -104,7 +104,7 @@ Shader "Daggerfall/DistantTerrain/TransitionRingTilemapTextureArray" {
 			int mapPixelY = _MapPixelY;
 
 			int posX = mapPixelX;
-			int posY = 500 - mapPixelY;
+			int posY = 499 - mapPixelY;
 
 			float2 uvTex =	float2(
 									(float)posX/(float)_FarTerrainTilemapDim + (1.0f/_FarTerrainTilemapDim)*IN.uv_MainTex.x,
@@ -125,7 +125,7 @@ Shader "Daggerfall/DistantTerrain/TransitionRingTilemapTextureArray" {
 
 			c = getColorFromTerrain(IN, uvTex, _TilemapDim, _TilesetDim, index);
 			
-			float treeCoverage = terrainTileInfo.g;
+			int treeCoverage = terrainTileInfo.g;
 			int locationRangeX = terrainTileInfo.b * _MaxIndex;
 			int locationRangeY = terrainTileInfo.a * _MaxIndex;
 			c.rgb = updateColorWithInfoForTreeCoverageAndLocations(c.rgb, treeCoverage, locationRangeX, locationRangeY, mapPixelX, mapPixelY, uvTex);			
@@ -187,7 +187,7 @@ Shader "Daggerfall/DistantTerrain/TransitionRingTilemapTextureArray" {
 
 			float blendWeightX = lerp(_blendWeightFarTerrainLeft, _blendWeightFarTerrainRight, IN.uv_MainTex.x);
 			float blendWeightY = lerp(_blendWeightFarTerrainTop, _blendWeightFarTerrainBottom, IN.uv_MainTex.y);
-			float blendWeightCombined = 1.0f - max(blendWeightX, blendWeightY);
+			float blendWeightCombined =  1.0f - max(blendWeightX, blendWeightY);
 			
 			#ifdef _NORMALMAP
 				o.Normal = UnpackNormal(UNITY_SAMPLE_TEX2DARRAY_LOD(_TileNormalMapTexArr, uv3, mipMapLevel));
@@ -209,7 +209,6 @@ Shader "Daggerfall/DistantTerrain/TransitionRingTilemapTextureArray" {
 			#endif
 			
 			c.rgb = lerp(c.rgb, c2.rgb, blendWeightCombined);
-
 			o.Albedo = c.rgb;
 		}
 

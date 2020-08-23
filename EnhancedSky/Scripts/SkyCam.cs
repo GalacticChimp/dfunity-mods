@@ -8,6 +8,10 @@
 
 
 using UnityEngine;
+
+//using DaggerfallConnect;
+//using DaggerfallConnect.Arena2;
+//using DaggerfallConnect.Utility;
 using DaggerfallWorkshop;
 using DaggerfallWorkshop.Utility;
 
@@ -17,19 +21,18 @@ namespace EnhancedSky
     {
         public GameObject mainCamera;
         public Camera skyCamera;
-        private RetroRenderer _retroRenderer;
 
         // Use this for initialization
         void Start()
         {
-            if (!skyCamera)
+            if(!skyCamera)
                 skyCamera = this.GetComponent<Camera>();
             if (!mainCamera)
                 mainCamera = DaggerfallWorkshop.Game.GameManager.Instance.MainCameraObject;
 
-            _retroRenderer = FindObjectOfType<RetroRenderer>();
             //SkyCamera.renderingPath = MainCamera.GetComponent<Camera>().renderingPath;
             GetCameraSettings();
+
         }
 
         void LateUpdate()
@@ -40,7 +43,7 @@ namespace EnhancedSky
         void GetCameraSettings()
         {
             Camera mainCam = mainCamera.GetComponent<Camera>();
-            if (mainCam)
+            if(mainCam)
             {
                 skyCamera.renderingPath = mainCam.renderingPath;
                 skyCamera.fieldOfView = mainCam.fieldOfView;
@@ -51,22 +54,19 @@ namespace EnhancedSky
                 Debug.Log("Using default settings for SkyCamera");
                 skyCamera.fieldOfView = 65;
                 skyCamera.renderingPath = RenderingPath.DeferredShading;
+
+            }
+            
+
+            if (DaggerfallUnity.Settings.RetroRenderingMode > 0)
+            {
+                skyCamera.targetTexture = DaggerfallWorkshop.Game.GameManager.Instance.RetroRenderer.RetroTexture;
             }
 
-            var retroMode = DaggerfallUnity.Settings.RetroRenderingMode;
-
-            if (retroMode == 0)
-            {
-                return;
-            }
-            else if (retroMode == 1)
-            {
-                skyCamera.targetTexture = _retroRenderer.RetroTexture320x200;
-            }
-            else if (retroMode == 2)
-            {
-                skyCamera.targetTexture = _retroRenderer.RetroTexture640x400;
-            }
         }
+
+
+
+
     }
 }
